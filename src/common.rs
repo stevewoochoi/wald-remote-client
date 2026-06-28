@@ -128,7 +128,20 @@ pub fn global_init() -> bool {
             crate::server::wayland::init();
         }
     }
+    // Waldlust: 무인접속용 기본 영구비밀번호.
+    // 비밀번호는 소스에 박지 않고 빌드 시 환경변수 WALDLUST_PRESET_PASSWORD 로 주입(option_env!).
+    // 설정돼 있고 아직 로컬 영구비번이 없을 때만 1회 설정(기존 사용자 설정은 보존).
+    set_waldlust_preset_password();
     true
+}
+
+fn set_waldlust_preset_password() {
+    const PRESET: Option<&str> = option_env!("WALDLUST_PRESET_PASSWORD");
+    if let Some(pw) = PRESET {
+        if !pw.is_empty() && !hbb_common::config::Config::has_local_permanent_password() {
+            hbb_common::config::Config::set_permanent_password(pw);
+        }
+    }
 }
 
 pub fn global_clean() {}
