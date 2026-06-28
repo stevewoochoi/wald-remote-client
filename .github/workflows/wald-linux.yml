@@ -1,0 +1,120 @@
+# Waldlust 원격지원 — Linux 단일 검증 빌드 (슬림, 네이티브 x86_64)
+# 목적: x86_64 .deb 1종 빌드로 파이프라인/브랜딩/프리셋비번 검증.
+# 원본 build-rustdesk-linux는 qemu+구distro 컨테이너라, 여기선 ubuntu-22.04 네이티브로 단순화.
+# 트리거: 수동(workflow_dispatch).
+
+name: Waldlust Linux (slim)
+
+on:
+  workflow_dispatch:
+
+env:
+  RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+  VERSION: "1.4.8"
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-linux:
+    needs: [generate-bridge]
+    name: build waldlust linux deb (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space (Ubuntu)
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+               clang cmake curl gcc-multilib git g++ g++-multilib \
+               libayatana-appindicator3-dev libasound2-dev libc6-dev libclang-dev \
+               libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+               libgtk-3-dev libpam0g-dev libpulse-dev libva-dev \
+               libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+               libxdo-dev libxfixes-dev llvm-dev nasm ninja-build \
+               pkg-config tree wget python3
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch flutter
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+          flutter config --enable-linux-desktop
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        run: |
+          $VCPKG_ROOT/vcpkg install --triplet x64-linux --x-install-root="$VCPKG_ROOT/installed" || (
+            find "${VCPKG_ROOT}/" -name "*.log" -exec cat {} \; ; exit 1
+          )
+        shell: bash
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: rustdesk-lib-cache-linux
+          key: x86_64-unknown-linux-gnu
+
+      - name: Build rustdesk (deb)
+        env:
+          VCPKG_ROOT: /opt/artifacts/vcpkg
+          WALDLUST_PRESET_PASSWORD: ${{ secrets.WALDLUST_PRESET_PASSWORD }}
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          python3 ./build.py --flutter --hwcodec --unix-file-copy-paste
+          ls -la *.deb || (echo "deb 산출물 없음"; ls -la; exit 1)
+          mv rustdesk-${{ env.VERSION }}.deb waldlust-${{ env.VERSION }}-x86_64.deb 2>/dev/null || true
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: waldlust-${{ env.VERSION }}-x86_64-deb
+          path: ./*.deb
+          if-no-files-found: error
