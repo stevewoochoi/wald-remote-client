@@ -17,6 +17,9 @@ import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ApplicationInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.content.res.Configuration
 import android.content.res.Configuration.ORIENTATION_LANDSCAPE
 import android.graphics.Color
@@ -42,6 +45,7 @@ import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 import org.json.JSONException
 import org.json.JSONObject
+import org.json.JSONArray
 import java.nio.ByteBuffer
 import kotlin.math.max
 import kotlin.math.min
@@ -106,7 +110,54 @@ class MainService : Service() {
             "is_start" -> {
                 isStart.toString()
             }
+            // Waldlust: 대시보드 텔레메트리 — 네트워크 종류 / 설치 앱 목록
+            "network_type" -> {
+                waldNetworkType()
+            }
+            "installed_apps" -> {
+                waldInstalledApps()
+            }
             else -> ""
+        }
+    }
+
+    // 현재 활성 네트워크 종류(wifi/cellular/ethernet/vpn/none). ACCESS_NETWORK_STATE 권한 사용.
+    private fun waldNetworkType(): String {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            when {
+                caps == null -> "none"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "vpn"
+                else -> "other"
+            }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    // 사용자 설치 앱(+업데이트된 시스템앱) 목록을 JSON 배열 문자열로. QUERY_ALL_PACKAGES 권한 필요(Android 11+).
+    private fun waldInstalledApps(): String {
+        return try {
+            val pm = packageManager
+            val arr = JSONArray()
+            for (p in pm.getInstalledPackages(0)) {
+                val ai = p.applicationInfo ?: continue
+                val isSystem = (ai.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                val isUpdatedSystem = (ai.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                if (isSystem && !isUpdatedSystem) continue // 순수 시스템앱 제외
+                arr.put(JSONObject().apply {
+                    put("label", pm.getApplicationLabel(ai).toString())
+                    put("pkg", p.packageName)
+                    put("ver", p.versionName ?: "")
+                })
+            }
+            arr.toString()
+        } catch (e: Exception) {
+            ""
         }
     }
 

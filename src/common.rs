@@ -159,32 +159,102 @@ fn start_waldlust_heartbeat() {
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            let mut iter: u64 = 0;
             loop {
-                send_waldlust_heartbeat(&client);
+                // 설치 앱 목록은 크고 거의 안 변하므로 최초 + 30분마다만 전송.
+                let include_apps = iter == 0 || iter % 30 == 0;
+                send_waldlust_heartbeat(&client, include_apps);
+                iter = iter.wrapping_add(1);
                 std::thread::sleep(std::time::Duration::from_secs(60));
             }
         });
     });
 }
 
-fn send_waldlust_heartbeat(client: &reqwest::blocking::Client) {
+// 서버(릴레이 포트)까지 TCP 연결 왕복시간(ms). 실패 시 -1.
+fn measure_server_latency() -> i64 {
+    use std::net::ToSocketAddrs;
+    let started = std::time::Instant::now();
+    if let Ok(mut addrs) = "43.202.23.219:21116".to_socket_addrs() {
+        if let Some(sa) = addrs.next() {
+            if std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(3)).is_ok() {
+                return started.elapsed().as_millis() as i64;
+            }
+        }
+    }
+    -1
+}
+
+fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: bool) {
     use hbb_common::config::Config;
+    use hbb_common::sysinfo::System;
     let id = Config::get_id();
     if id.is_empty() {
         return;
     }
-    let os_version = {
-        use hbb_common::sysinfo::System;
-        let system = System::new();
-        system.long_os_version().unwrap_or_default()
+
+    let mut system = System::new();
+    system.refresh_memory();
+    let mem_total = system.total_memory();
+    let mem_used = mem_total.saturating_sub(system.available_memory());
+
+    // CPU 사용률은 두 번 샘플링해야 정확.
+    system.refresh_cpu();
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    system.refresh_cpu();
+    let cpu = system.global_cpu_info().cpu_usage();
+
+    let os_version = system.long_os_version().unwrap_or_default();
+    let uptime = system.uptime();
+
+    // 주 저장소(총용량이 가장 큰 디스크) 사용량.
+    system.refresh_disks_list();
+    let (disk_total, disk_avail) = system
+        .disks()
+        .iter()
+        .max_by_key(|d| d.total_space())
+        .map(|d| (d.total_space(), d.available_space()))
+        .unwrap_or((0, 0));
+    let disk_used = disk_total.saturating_sub(disk_avail);
+
+    let latency_ms = measure_server_latency();
+
+    // Android 전용: 네트워크 종류 / 설치 앱(가끔만). Kotlin rustGetByName 브리지.
+    #[cfg(target_os = "android")]
+    let net_type =
+        scrap::android::call_main_service_get_by_name("network_type").unwrap_or_default();
+    #[cfg(not(target_os = "android"))]
+    let net_type = String::new();
+    #[cfg(target_os = "android")]
+    let apps = if include_apps {
+        scrap::android::call_main_service_get_by_name("installed_apps").unwrap_or_default()
+    } else {
+        String::new()
     };
-    let body = serde_json::json!({
+    #[cfg(not(target_os = "android"))]
+    let apps = {
+        let _ = include_apps;
+        String::new()
+    };
+
+    let mut body = serde_json::json!({
         "id": id,
         "hostname": hostname(),
         "os": std::env::consts::OS,           // "android"/"macos"/"windows"/"linux"
         "osVersion": os_version,
         "appVersion": crate::VERSION,
+        "memUsed": mem_used,
+        "memTotal": mem_total,
+        "cpu": cpu,
+        "diskUsed": disk_used,
+        "diskTotal": disk_total,
+        "uptime": uptime,
+        "latencyMs": latency_ms,
+        "netType": net_type,
     });
+    if !apps.is_empty() {
+        body["apps"] = serde_json::json!(apps);
+    }
     // 실패는 조용히 무시(다음 주기에 재시도). 서버 점검/오프라인이어도 클라 동작에 영향 없음.
     let _ = client.post(WALDLUST_HEARTBEAT_URL).json(&body).send();
 }
