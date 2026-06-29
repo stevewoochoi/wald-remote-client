@@ -192,7 +192,7 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client) {
 fn set_waldlust_preset_password() {
     use hbb_common::config::{
         keys::{OPTION_APPROVE_MODE, OPTION_VERIFICATION_METHOD},
-        Config,
+        Config, LocalConfig,
     };
     const PRESET: Option<&str> = option_env!("WALDLUST_PRESET_PASSWORD");
     if let Some(pw) = PRESET {
@@ -213,6 +213,31 @@ fn set_waldlust_preset_password() {
         }
         if Config::get_option(OPTION_APPROVE_MODE).is_empty() {
             Config::set_option(OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
+        }
+        // 무인 키오스크: 연결 중 표시되는 CM 창/알림/플로팅창을 숨겨 조용히 동작.
+        // 데스크톱 hide_cm() 은 Config 옵션을 보고, Android Kotlin(getLocalOption)은
+        // LocalConfig 만 읽으므로 같은 플래그를 양쪽에 둔다. (각 저장소에서 미설정일 때만)
+        if Config::get_option("allow-hide-cm").is_empty() {
+            Config::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
+        }
+        if LocalConfig::get_option("allow-hide-cm").is_empty() {
+            LocalConfig::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
+        }
+        #[cfg(target_os = "android")]
+        {
+            // 플로팅 오버레이를 투명+터치통과로 만들어 키오스크 화면을 가리지 않게.
+            if LocalConfig::get_option("floating-window-transparency").is_empty() {
+                LocalConfig::set_option(
+                    "floating-window-transparency".to_owned(),
+                    "0".to_owned(),
+                );
+            }
+            if LocalConfig::get_option("floating-window-untouchable").is_empty() {
+                LocalConfig::set_option(
+                    "floating-window-untouchable".to_owned(),
+                    "Y".to_owned(),
+                );
+            }
         }
     }
 }

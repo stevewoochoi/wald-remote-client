@@ -126,13 +126,19 @@ class MainService : Service() {
                     } else {
                         translate("Share screen")
                     }
+                    // Waldlust: 무인 키오스크에선 연결 팝업 알림을 숨긴다(allow-hide-cm=Y).
+                    val hideCm = FFI.getLocalOption("allow-hide-cm") == "Y"
                     if (authorized) {
                         if (!isFileTransfer && !isStart) {
                             startCapture()
                         }
-                        onClientAuthorizedNotification(id, type, username, peerId)
+                        if (!hideCm) {
+                            onClientAuthorizedNotification(id, type, username, peerId)
+                        }
                     } else {
-                        loginRequestNotification(id, type, username, peerId)
+                        if (!hideCm) {
+                            loginRequestNotification(id, type, username, peerId)
+                        }
                     }
                 } catch (e: JSONException) {
                     e.printStackTrace()
