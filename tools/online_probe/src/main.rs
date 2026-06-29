@@ -30,6 +30,8 @@ async fn run() {
         ..Default::default()
     });
 
+    let debug = std::env::var("PROBE_DEBUG").is_ok();
+    if debug { eprintln!("[dbg] connecting to {}", server); }
     let mut socket = match socket_client::connect_tcp(server, 5000).await {
         Ok(s) => s,
         Err(e) => {
@@ -37,6 +39,7 @@ async fn run() {
             std::process::exit(2);
         }
     };
+    if debug { eprintln!("[dbg] connected, sending OnlineRequest for {} peers", ids.len()); }
     if let Err(e) = socket.send(&msg).await {
         eprintln!("send failed: {e}");
         std::process::exit(3);
@@ -46,8 +49,11 @@ async fn run() {
     for _ in 0..3 {
         match socket.next_timeout(5000).await {
             Some(Ok(bytes)) => {
+                if debug { eprintln!("[dbg] frame {} bytes: {}", bytes.len(), hex(&bytes)); }
                 if let Ok(m) = RendezvousMessage::parse_from_bytes(&bytes) {
+                    if debug { eprintln!("[dbg] union: {:?}", m.union.as_ref().map(|_| "some")); }
                     if let Some(rendezvous_message::Union::OnlineResponse(r)) = m.union {
+                        if debug { eprintln!("[dbg] states hex: {}", hex(&r.states)); }
                         let states = r.states;
                         for (i, id) in ids.iter().enumerate() {
                             // 바이트 내 MSB-first (RustDesk client과 동일)
@@ -61,8 +67,15 @@ async fn run() {
                     }
                 }
             }
-            _ => break,
+            other => {
+                if debug { eprintln!("[dbg] no frame: {:?}", other.map(|_| "err")); }
+                break;
+            }
         }
     }
     // 응답 없음 → 아무것도 출력 안 함(전부 오프라인 취급)
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{:02x}", x)).collect()
 }
