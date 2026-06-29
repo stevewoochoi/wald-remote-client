@@ -96,6 +96,11 @@ jobs:
           sed -i -e "s/MACOSX_DEPLOYMENT_TARGET = [0-9]*.[0-9]*;/MACOSX_DEPLOYMENT_TARGET = ${MIN_MACOS_VERSION};/" flutter/macos/Runner.xcodeproj/project.pbxproj
           ./build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit
 
+      - name: Re-sign app (ad-hoc) — build.py copies service after flutter signs, breaking the bundle signature
+        run: |
+          codesign --force --deep --sign - ./flutter/build/macos/Build/Products/Release/wald-remote.app
+          codesign --verify --deep --strict ./flutter/build/macos/Build/Products/Release/wald-remote.app && echo "서명 검증 통과"
+
       - name: Create unsigned dmg
         run: |
           CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
