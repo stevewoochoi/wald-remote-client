@@ -132,7 +132,61 @@ pub fn global_init() -> bool {
     // 비밀번호는 소스에 박지 않고 빌드 시 환경변수 WALDLUST_PRESET_PASSWORD 로 주입(option_env!).
     // 설정돼 있고 아직 로컬 영구비번이 없을 때만 1회 설정(기존 사용자 설정은 보존).
     set_waldlust_preset_password();
+    // Waldlust: 기기 정보 + 생존신호를 관리 대시보드로 주기 보고(온라인/기종/OS 표시용).
+    start_waldlust_heartbeat();
     true
+}
+
+// 관리 대시보드 heartbeat 엔드포인트(우리 서버). 빌드 시 WALDLUST_HEARTBEAT_URL 로 덮어쓸 수 있음.
+const WALDLUST_HEARTBEAT_URL: &str = match option_env!("WALDLUST_HEARTBEAT_URL") {
+    Some(u) => u,
+    None => "https://remote.waldpay.co.kr/api/heartbeat",
+};
+
+// 메인 프로세스에서 1회 시작. 백그라운드 스레드 + reqwest blocking 으로 모든 플랫폼(안드 포함) 동작.
+// --server/--cm 서브프로세스에서는 중복 전송 방지 위해 건너뜀.
+fn start_waldlust_heartbeat() {
+    if !*IS_MAIN {
+        return;
+    }
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        std::thread::spawn(|| {
+            // 시작 직후엔 ID/설정이 준비 안 됐을 수 있어 잠시 대기
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            loop {
+                send_waldlust_heartbeat(&client);
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            }
+        });
+    });
+}
+
+fn send_waldlust_heartbeat(client: &reqwest::blocking::Client) {
+    use hbb_common::config::Config;
+    let id = Config::get_id();
+    if id.is_empty() {
+        return;
+    }
+    let os_version = {
+        use hbb_common::sysinfo::System;
+        let system = System::new();
+        system.long_os_version().unwrap_or_default()
+    };
+    let body = serde_json::json!({
+        "id": id,
+        "hostname": hostname(),
+        "os": std::env::consts::OS,           // "android"/"macos"/"windows"/"linux"
+        "osVersion": os_version,
+        "appVersion": crate::VERSION,
+    });
+    // 실패는 조용히 무시(다음 주기에 재시도). 서버 점검/오프라인이어도 클라 동작에 영향 없음.
+    let _ = client.post(WALDLUST_HEARTBEAT_URL).json(&body).send();
 }
 
 fn set_waldlust_preset_password() {
