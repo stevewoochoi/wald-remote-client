@@ -7,8 +7,15 @@ use hbb_common::{
     socket_client,
 };
 
-#[hbb_common::tokio::main(flavor = "current_thread")]
-async fn main() {
+fn main() {
+    hbb_common::tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime")
+        .block_on(run());
+}
+
+async fn run() {
     let ids: Vec<String> = std::env::args().skip(1).collect();
     if ids.is_empty() {
         eprintln!("usage: wald-online-probe <id>...  (env ONLINE_SERVER=host:port, default 127.0.0.1:21115)");
