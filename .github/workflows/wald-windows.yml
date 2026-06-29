@@ -113,7 +113,7 @@ jobs:
           runner_res=$(find . -name "Runner.res" | head -1); [ -n "$runner_res" ] && cp "$runner_res" ./libs/portable/Runner.res || true
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/wald-remote.exe
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/waldlust-${{ env.VERSION }}-x86_64.exe || true
