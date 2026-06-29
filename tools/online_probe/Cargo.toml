@@ -1,0 +1,11 @@
+[package]
+name = "wald-online-probe"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "wald-online-probe"
+path = "src/main.rs"
+
+[dependencies]
+hbb_common = { path = "../../libs/hbb_common" }

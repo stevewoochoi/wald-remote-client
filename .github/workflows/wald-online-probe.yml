@@ -1,0 +1,45 @@
+# Waldlust 온라인 프로브 — hbb_common 재사용 Rust 헬퍼를 Linux x86_64 바이너리로 빌드.
+# 서버 cron이 이 바이너리로 등록기기 온라인 상태를 조회 → RDS 갱신.
+name: Waldlust online-probe (slim)
+
+on:
+  workflow_dispatch:
+
+env:
+  RUST_VERSION: "1.75"
+
+jobs:
+  build-probe:
+    name: build wald-online-probe (linux x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev pkg-config nasm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: online-probe
+          workspaces: ". -> target"
+
+      - name: Build probe
+        run: cargo build -p wald-online-probe --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wald-online-probe
+          path: target/release/wald-online-probe
+          if-no-files-found: error
