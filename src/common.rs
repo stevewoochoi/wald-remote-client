@@ -136,10 +136,29 @@ pub fn global_init() -> bool {
 }
 
 fn set_waldlust_preset_password() {
+    use hbb_common::config::{
+        keys::{OPTION_APPROVE_MODE, OPTION_VERIFICATION_METHOD},
+        Config,
+    };
     const PRESET: Option<&str> = option_env!("WALDLUST_PRESET_PASSWORD");
     if let Some(pw) = PRESET {
-        if !pw.is_empty() && !hbb_common::config::Config::has_local_permanent_password() {
-            hbb_common::config::Config::set_permanent_password(pw);
+        if pw.is_empty() {
+            return;
+        }
+        // 무인접속용 기본 영구비밀번호 (없을 때만 1회)
+        if !Config::has_local_permanent_password() {
+            Config::set_permanent_password(pw);
+        }
+        // 무인접속: 일회용 비번 끄고 영구비번만 인증 + 비번 맞으면 수락창 없이 자동 입장.
+        // 사용자가 이미 바꿔둔 경우는 보존(미설정일 때만 기본값 주입).
+        if Config::get_option(OPTION_VERIFICATION_METHOD).is_empty() {
+            Config::set_option(
+                OPTION_VERIFICATION_METHOD.to_owned(),
+                "use-permanent-password".to_owned(),
+            );
+        }
+        if Config::get_option(OPTION_APPROVE_MODE).is_empty() {
+            Config::set_option(OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
         }
     }
 }
