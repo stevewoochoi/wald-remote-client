@@ -207,16 +207,6 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
     let os_version = system.long_os_version().unwrap_or_default();
     let uptime = system.uptime();
 
-    // 주 저장소(총용량이 가장 큰 디스크) 사용량.
-    system.refresh_disks_list();
-    let (disk_total, disk_avail) = system
-        .disks()
-        .iter()
-        .max_by_key(|d| d.total_space())
-        .map(|d| (d.total_space(), d.available_space()))
-        .unwrap_or((0, 0));
-    let disk_used = disk_total.saturating_sub(disk_avail);
-
     let latency_ms = measure_server_latency();
 
     // Android 전용: 네트워크 종류 / 설치 앱(가끔만). Kotlin rustGetByName 브리지.
@@ -246,8 +236,6 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
         "memUsed": mem_used,
         "memTotal": mem_total,
         "cpu": cpu,
-        "diskUsed": disk_used,
-        "diskTotal": disk_total,
         "uptime": uptime,
         "latencyMs": latency_ms,
         "netType": net_type,
