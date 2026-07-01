@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- Waldlust: 이 매니페스트는 자기추출 설치 패커(rustdesk-portable-packer, 우리가 배포하는
+       waldlust-x.x.x-x86_64.exe) 전용이다. res/manifest.xml(메인 앱·service/naming 바이너리가
+       공유)과는 별개 파일로 분리했다 — 여기서만 requireAdministrator 를 켜서, 더블클릭 즉시
+       Windows가 UAC 승인을 요구하게 만든다. 우클릭 "관리자 권한으로 실행"이나 .bat 스크립트의
+       runas 동사를 거치지 않으므로, 그 경로에서 일부 매장 PC(백신/그룹정책 등)가 조용히
+       막아버리던 문제를 우회한다. 서비스로 설치된 뒤 상시 실행되는 실제 앱 바이너리에는
+       영향 없음(별도 매니페스트를 그대로 씀). -->
+  <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+    <asmv3:windowsSettings
+         xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </asmv3:windowsSettings>
+  </asmv3:application>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+        <application>
+            <!-- Windows 10 -->
+            <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+            <!-- Windows 8.1 -->
+            <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+            <!-- Windows Vista -->
+            <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+            <!-- Windows 7 -->
+            <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+            <!-- Windows 8 -->
+            <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+        </application>
+  </compatibility>
+  <dependency>
+      <dependentAssembly>
+          <assemblyIdentity
+              type="win32"
+              name="Microsoft.Windows.Common-Controls"
+              version="6.0.0.0"
+              processorArchitecture="*"
+              publicKeyToken="6595b64144ccf1df"
+              language="*"
+          />
+      </dependentAssembly>
+  </dependency>
+</assembly>

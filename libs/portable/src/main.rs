@@ -186,7 +186,11 @@ fn main() {
         }
         i += 1;
     }
-    let click_setup = args.is_empty() && arg_exe.to_lowercase().ends_with("install.exe");
+    // Waldlust: 원래는 파일명이 "...install.exe"로 끝나야만 더블클릭시 설치 흐름을 탔다.
+    // 우리 배포 파일명(waldlust-x.x.x-x86_64.exe)은 그 규칙과 무관하게 "인자 없이 실행=더블클릭
+    // =설치"로 취급한다. 패커 매니페스트(requireAdministrator)가 이미 UAC를 띄워주므로,
+    // 승인만 하면 바로 설치까지 끝나야 한다 — 자세한 배경은 아래 --silent-install 분기 참고.
+    let click_setup = args.is_empty();
     #[cfg(windows)]
     let quick_support = args.is_empty() && win::is_quick_support_exe(&arg_exe);
     #[cfg(not(windows))]
@@ -202,7 +206,11 @@ fn main() {
         &mut ui,
     ) {
         if click_setup {
-            args = vec!["--install".to_owned()];
+            // Waldlust: 원래는 "--install"(내부 앱의 설치화면을 띄우고 사용자가 다시 "Install"
+            // 버튼을 눌러야 함)이었다. 매니페스트로 이미 UAC 승인을 받은 상태이므로, 그 자리에서
+            // 곧장 무인 설치(install_me, 서비스 등록)까지 끝내는 "--silent-install"로 바꿔
+            // 승인 1번으로 설치가 완료되게 한다.
+            args = vec!["--silent-install".to_owned()];
         } else if quick_support {
             args = vec!["--quick_support".to_owned()];
         }
