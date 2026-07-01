@@ -145,26 +145,33 @@ const WALDLUST_HEARTBEAT_URL: &str = match option_env!("WALDLUST_HEARTBEAT_URL")
 
 // 메인 프로세스에서 1회 시작. 백그라운드 스레드 + reqwest blocking 으로 모든 플랫폼(안드 포함) 동작.
 //
-// 주의(중요): 여기서 절대 IS_MAIN 을 쓰면 안 된다. IS_MAIN 은 "인자 없이 실행됐는가"만 보는데,
-// 정작 설치된 백그라운드 서비스(Windows sc.exe binpath="... --service", Linux systemd
-// ExecStart=... --service)는 항상 "--service" 인자로 실행되어 IS_MAIN=false 다. 예전엔 이 때문에
-// 무인 키오스크(사람이 대화형 창을 안 여는 게 정상)에서 heartbeat 가 영원히 안 나가는 버그가 있었다.
-// 실제로 매 순간 살아있는(=heartbeat 를 보내야 하는) 프로세스는 "인자 없음(대화형 UI)" 또는
-// "--service"(설치된 백그라운드 데몬) 이고, 접속당 짧게 뜨는 --server/--cm/--cm-no-ui 서브프로세스만
-// 제외하면 된다(중복 전송 방지 목적, 두 프로세스가 동시에 보내도 서버 upsert 라 해롭진 않음).
+// 주의(중요): "이 프로세스가 상시 프로세스인가"를 인자(--service/--server/--cm 등)로 추측하지 않는다.
+// 실제로 어떤 인자가 "상시 프로세스"를 뜻하는지가 플랫폼마다 다르다:
+//   - Windows: sc.exe 가 등록한 서비스는 "<exe> --service" 로 실행됨(상시).
+//   - Linux: systemd ExecStart 도 "<exe> --service" (상시).
+//   - macOS: LaunchDaemon(daemon.plist)은 별도의 작은 "service" 트램폴린 바이너리를 인자 없이
+//     실행하는데 이건 global_init() 자체를 안 부름. 실제 상시 프로세스는 LaunchAgent(agent.plist)가
+//     "<exe> --server" 로 띄우는 쪽(KeepAlive+RunAtLoad) — 즉 macOS 에서는 --server 가 상시다.
+// "--server 는 짧게 사는 서브프로세스"라고 가정했다가 macOS 에서 상시 프로세스를 걸러버리는
+// 버그를 냈던 적이 있다. 그래서 인자로 판별하는 대신, 로컬 루프백 포트 하나를 선점하는 방식으로
+// "이 기기에서 heartbeat 를 보낼 단 하나의 프로세스"를 정한다 — 먼저 뜬 프로세스가 이기고,
+// 그 프로세스가 죽으면 포트가 자동으로 풀려 다음에 뜨는 프로세스가 이어받는다. 접속당 잠깐
+// 뜨는 --cm/--cm-no-ui(연결 승인 팝업)만 애초에 시도조차 안 하도록 걸러 불필요한 경합을 줄인다.
 fn start_waldlust_heartbeat() {
     let arg1 = std::env::args().nth(1);
-    let is_transient_subprocess = matches!(
-        arg1.as_deref(),
-        Some("--server") | Some("--cm") | Some("--cm-no-ui")
-    );
-    if is_transient_subprocess {
+    if matches!(arg1.as_deref(), Some("--cm") | Some("--cm-no-ui")) {
         return;
     }
     use std::sync::Once;
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         std::thread::spawn(|| {
+            // 이 기기에서 heartbeat 를 담당할 프로세스를 하나로 정하는 락. 스레드(=이 함수 스택)가
+            // 사는 동안 리스너를 쥐고 있어야 하므로 루프 밖 지역변수로 유지한다(드롭 금지).
+            let _heartbeat_owner_lock = match std::net::TcpListener::bind("127.0.0.1:47635") {
+                Ok(l) => l,
+                Err(_) => return, // 이미 다른 프로세스가 담당 중
+            };
             // 시작 직후엔 ID/설정이 준비 안 됐을 수 있어 잠시 대기
             std::thread::sleep(std::time::Duration::from_secs(10));
             let client = reqwest::blocking::Client::builder()
