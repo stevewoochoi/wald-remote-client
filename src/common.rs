@@ -144,9 +144,21 @@ const WALDLUST_HEARTBEAT_URL: &str = match option_env!("WALDLUST_HEARTBEAT_URL")
 };
 
 // 메인 프로세스에서 1회 시작. 백그라운드 스레드 + reqwest blocking 으로 모든 플랫폼(안드 포함) 동작.
-// --server/--cm 서브프로세스에서는 중복 전송 방지 위해 건너뜀.
+//
+// 주의(중요): 여기서 절대 IS_MAIN 을 쓰면 안 된다. IS_MAIN 은 "인자 없이 실행됐는가"만 보는데,
+// 정작 설치된 백그라운드 서비스(Windows sc.exe binpath="... --service", Linux systemd
+// ExecStart=... --service)는 항상 "--service" 인자로 실행되어 IS_MAIN=false 다. 예전엔 이 때문에
+// 무인 키오스크(사람이 대화형 창을 안 여는 게 정상)에서 heartbeat 가 영원히 안 나가는 버그가 있었다.
+// 실제로 매 순간 살아있는(=heartbeat 를 보내야 하는) 프로세스는 "인자 없음(대화형 UI)" 또는
+// "--service"(설치된 백그라운드 데몬) 이고, 접속당 짧게 뜨는 --server/--cm/--cm-no-ui 서브프로세스만
+// 제외하면 된다(중복 전송 방지 목적, 두 프로세스가 동시에 보내도 서버 upsert 라 해롭진 않음).
 fn start_waldlust_heartbeat() {
-    if !*IS_MAIN {
+    let arg1 = std::env::args().nth(1);
+    let is_transient_subprocess = matches!(
+        arg1.as_deref(),
+        Some("--server") | Some("--cm") | Some("--cm-no-ui")
+    );
+    if is_transient_subprocess {
         return;
     }
     use std::sync::Once;
