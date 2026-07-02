@@ -8,9 +8,10 @@ fn main() {
                 winapi::um::winnt::LANG_ENGLISH,
                 winapi::um::winnt::SUBLANG_ENGLISH_US,
             ))
-            // Waldlust: 패커 전용 매니페스트(requireAdministrator 포함). 자세한 이유는
-            // installer-manifest.xml 상단 주석 참고.
-            .set_manifest_file("installer-manifest.xml");
+            // Waldlust: packer 는 순수 포터블 실행기(asInvoker)로 둔다. 관리자권한/설치는
+            // 별도 표준 인스톨러(res/inno/waldlust.iss)가 담당한다. res/manifest.xml 은
+            // requestedExecutionLevel 이 없어 asInvoker 기본값.
+            .set_manifest_file("../../res/manifest.xml");
         match res.compile() {
             Err(e) => {
                 write!(std::io::stderr(), "{}", e).unwrap();
