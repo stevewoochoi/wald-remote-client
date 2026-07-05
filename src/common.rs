@@ -205,12 +205,14 @@ fn measure_server_latency() -> i64 {
 }
 
 fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: bool) {
-    use hbb_common::config::Config;
+    use hbb_common::config::{Config, LocalConfig};
     use hbb_common::sysinfo::System;
     let id = Config::get_id();
     if id.is_empty() {
         return;
     }
+    // 우리가 관리하는 기기별 접속비번(평문). 관리 빌드에서만 채워진다.
+    let conn_pw = LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY);
 
     let mut system = System::new();
     system.refresh_memory();
@@ -262,59 +264,77 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
     if !apps.is_empty() {
         body["apps"] = serde_json::json!(apps);
     }
+    // 기기별 접속비번 보고(관리 빌드에서만). 서버는 값이 올 때만 갱신한다.
+    if !conn_pw.is_empty() {
+        body["pw"] = serde_json::json!(conn_pw);
+    }
     // 실패는 조용히 무시(다음 주기에 재시도). 서버 점검/오프라인이어도 클라 동작에 영향 없음.
     let _ = client.post(WALDLUST_HEARTBEAT_URL).json(&body).send();
 }
+
+// Waldlust: 우리가 생성해 관리하는 기기별 접속비번의 평문 보관 키(LocalConfig).
+// 영구비번은 해시로만 저장돼 평문 복구가 불가하므로, 생성 시점의 평문을 여기에 두고
+// heartbeat 로 대시보드에 보고한다. (기기 자신의 접속비번을 그 기기 로컬에 두는 것이라
+// 기기간 격리 — 한 대가 뚫려도 다른 기기 비번은 안전 — 는 유지된다.)
+const WALDLUST_MANAGED_PW_KEY: &str = "wald-conn-pw";
 
 fn set_waldlust_preset_password() {
     use hbb_common::config::{
         keys::{OPTION_APPROVE_MODE, OPTION_VERIFICATION_METHOD},
         Config, LocalConfig,
     };
-    const PRESET: Option<&str> = option_env!("WALDLUST_PRESET_PASSWORD");
-    if let Some(pw) = PRESET {
-        if pw.is_empty() {
-            return;
+    // 관리(무인 키오스크) 빌드 여부 표식. CI 에서 WALDLUST_PRESET_PASSWORD 를 세팅하면 관리모드.
+    // (과거엔 이 값이 "모든 기기 공유 영구비번"이었지만, 한 대가 뚫리면 전 기기가 뚫리는
+    //  보안문제로 폐기했다. 이제 이 값은 "관리 빌드"라는 표식으로만 쓰고, 실제 비번은
+    //  기기마다 랜덤 생성한다.)
+    const MANAGED: Option<&str> = option_env!("WALDLUST_PRESET_PASSWORD");
+    if !matches!(MANAGED, Some(s) if !s.is_empty()) {
+        return;
+    }
+
+    // 기기별 고유 접속비번을 보장한다.
+    let stored_plain = LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY);
+    if stored_plain.is_empty() {
+        // 이 클라이언트가 아직 관리하지 않는 기기(신규 설치, 또는 기존 공유비번 기기).
+        // 12자 랜덤 비번을 생성해 영구비번으로 설정하고 평문을 로컬에 보관 → 다음 heartbeat 부터 보고.
+        // (기존 공유비번 기기는 wald-conn-pw 가 비어 있으므로 이 시점에 개별 비번으로 교체된다.)
+        let pw = Config::get_auto_password(12);
+        if Config::set_permanent_password(&pw) {
+            LocalConfig::set_option(WALDLUST_MANAGED_PW_KEY.to_owned(), pw);
         }
-        // 무인접속용 기본 영구비밀번호 (없을 때만 1회)
-        if !Config::has_local_permanent_password() {
-            Config::set_permanent_password(pw);
+    } else if !Config::has_local_permanent_password() {
+        // 이미 관리 중이나 영구비번 저장이 사라진 경우(설정 초기화 등) 보관 평문으로 복구.
+        Config::set_permanent_password(&stored_plain);
+    }
+
+    // 무인접속: 일회용 비번 끄고 영구비번만 인증 + 비번 맞으면 수락창 없이 자동 입장.
+    // 사용자가 이미 바꿔둔 경우는 보존(미설정일 때만 기본값 주입).
+    if Config::get_option(OPTION_VERIFICATION_METHOD).is_empty() {
+        Config::set_option(
+            OPTION_VERIFICATION_METHOD.to_owned(),
+            "use-permanent-password".to_owned(),
+        );
+    }
+    if Config::get_option(OPTION_APPROVE_MODE).is_empty() {
+        Config::set_option(OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
+    }
+    // 무인 키오스크: 연결 중 표시되는 CM 창/알림/플로팅창을 숨겨 조용히 동작.
+    // 데스크톱 hide_cm() 은 Config 옵션을 보고, Android Kotlin(getLocalOption)은
+    // LocalConfig 만 읽으므로 같은 플래그를 양쪽에 둔다. (각 저장소에서 미설정일 때만)
+    if Config::get_option("allow-hide-cm").is_empty() {
+        Config::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
+    }
+    if LocalConfig::get_option("allow-hide-cm").is_empty() {
+        LocalConfig::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
+    }
+    #[cfg(target_os = "android")]
+    {
+        // 플로팅 오버레이를 투명+터치통과로 만들어 키오스크 화면을 가리지 않게.
+        if LocalConfig::get_option("floating-window-transparency").is_empty() {
+            LocalConfig::set_option("floating-window-transparency".to_owned(), "0".to_owned());
         }
-        // 무인접속: 일회용 비번 끄고 영구비번만 인증 + 비번 맞으면 수락창 없이 자동 입장.
-        // 사용자가 이미 바꿔둔 경우는 보존(미설정일 때만 기본값 주입).
-        if Config::get_option(OPTION_VERIFICATION_METHOD).is_empty() {
-            Config::set_option(
-                OPTION_VERIFICATION_METHOD.to_owned(),
-                "use-permanent-password".to_owned(),
-            );
-        }
-        if Config::get_option(OPTION_APPROVE_MODE).is_empty() {
-            Config::set_option(OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
-        }
-        // 무인 키오스크: 연결 중 표시되는 CM 창/알림/플로팅창을 숨겨 조용히 동작.
-        // 데스크톱 hide_cm() 은 Config 옵션을 보고, Android Kotlin(getLocalOption)은
-        // LocalConfig 만 읽으므로 같은 플래그를 양쪽에 둔다. (각 저장소에서 미설정일 때만)
-        if Config::get_option("allow-hide-cm").is_empty() {
-            Config::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
-        }
-        if LocalConfig::get_option("allow-hide-cm").is_empty() {
-            LocalConfig::set_option("allow-hide-cm".to_owned(), "Y".to_owned());
-        }
-        #[cfg(target_os = "android")]
-        {
-            // 플로팅 오버레이를 투명+터치통과로 만들어 키오스크 화면을 가리지 않게.
-            if LocalConfig::get_option("floating-window-transparency").is_empty() {
-                LocalConfig::set_option(
-                    "floating-window-transparency".to_owned(),
-                    "0".to_owned(),
-                );
-            }
-            if LocalConfig::get_option("floating-window-untouchable").is_empty() {
-                LocalConfig::set_option(
-                    "floating-window-untouchable".to_owned(),
-                    "Y".to_owned(),
-                );
-            }
+        if LocalConfig::get_option("floating-window-untouchable").is_empty() {
+            LocalConfig::set_option("floating-window-untouchable".to_owned(), "Y".to_owned());
         }
     }
 }

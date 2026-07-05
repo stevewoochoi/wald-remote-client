@@ -3710,8 +3710,13 @@ fn get_create_service(exe: &str) -> String {
 if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
 ", app_name = crate::get_app_name())
     } else {
+        // Waldlust: 무인 키오스크는 서비스가 상시 떠 있어야 트레이 창을 닫아도 원격이 유지된다.
+        //  - start= auto : 부팅 시 자동 시작
+        //  - sc start    : 설치 직후 즉시 시작(다음 부팅 안 기다림)
+        //  - sc failure  : 서비스가 크래시하면 Windows 가 자동 재시작(5s/5s/10s), 하루 뒤 카운터 리셋
         format!("
 sc create {app_name} binpath= \"\\\"{exe}\\\" --service\" start= auto DisplayName= \"{app_name} Service\"
+sc failure {app_name} reset= 86400 actions= restart/5000/restart/5000/restart/10000
 sc start {app_name}
 ",
     app_name = crate::get_app_name())

@@ -25,6 +25,7 @@ import android.media.AudioManager
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR
 import android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+import android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
 import android.view.inputmethod.EditorInfo
 import androidx.annotation.RequiresApi
 import java.util.*
@@ -66,6 +67,20 @@ class InputService : AccessibilityService() {
         var ctx: InputService? = null
         val isOpen: Boolean
             get() = ctx != null
+
+        // Waldlust(무인): 화면공유(MediaProjection) 동의 팝업을 사람 없이 자동 승인한다.
+        // requestMediaProjection() 직전에 true 로 켜지고, 팝업의 "시작/허용" 버튼을 클릭하면 해제된다.
+        // (잘못된 다이얼로그 클릭을 막기 위해 시스템UI 창에서만, 그리고 짧은 시간창에서만 동작)
+        @Volatile
+        var autoAcceptProjection = false
+
+        // 여러 로케일/버전의 화면공유 승인 버튼 문구.
+        val projectionAcceptTexts = listOf(
+            "Start now", "START NOW", "Start", "Allow",
+            "지금 시작", "시작", "허용", "확인",
+            "开始", "立即开始", "确定", "允许",
+            "開始", "始める"
+        )
     }
 
     private val logTag = "input service"
@@ -711,17 +726,66 @@ class InputService : AccessibilityService() {
 
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // Waldlust(무인): 화면공유 동의 팝업 자동 승인.
+        if (!autoAcceptProjection) return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
+        // MediaProjection 동의 팝업은 시스템UI/android 패키지에 뜬다. 다른 앱 팝업 오클릭 방지.
+        val pkg = event.packageName?.toString() ?: ""
+        if (pkg != "com.android.systemui" && pkg != "android") return
+        val root = rootInActiveWindow ?: return
+        if (tryClickProjectionAccept(root)) {
+            autoAcceptProjection = false
+            Log.d(logTag, "auto-accepted screen projection dialog")
+        }
+    }
+
+    // 화면공유 팝업의 "시작/허용" 버튼을 찾아 클릭. 좌표가 아닌 노드(버튼 id/문구) 매칭이라 해상도 무관.
+    private fun tryClickProjectionAccept(root: AccessibilityNodeInfo): Boolean {
+        // 1) 표준 긍정 버튼 id 우선(android:id/button1)
+        try {
+            for (n in root.findAccessibilityNodeInfosByViewId("android:id/button1")) {
+                if (performClickable(n)) return true
+            }
+        } catch (_: Exception) {}
+        // 2) 문구 매칭(로케일/버전 대응)
+        for (t in projectionAcceptTexts) {
+            val nodes = try { root.findAccessibilityNodeInfosByText(t) } catch (_: Exception) { continue }
+            for (n in nodes) {
+                if (performClickable(n)) return true
+            }
+        }
+        return false
+    }
+
+    // 노드가 클릭 가능하면 클릭, 아니면 클릭 가능한 부모까지 올라가 클릭.
+    private fun performClickable(node: AccessibilityNodeInfo?): Boolean {
+        var c = node
+        var hops = 0
+        while (c != null && hops < 6) {
+            if (c.isClickable) {
+                return c.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            }
+            c = c.parent
+            hops++
+        }
+        return false
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         ctx = this
         val info = AccessibilityServiceInfo()
+        // FLAG_REPORT_VIEW_IDS: 화면공유 팝업의 표준 버튼(android:id/button1)을 id 로 찾기 위함.
         if (Build.VERSION.SDK_INT >= 33) {
-            info.flags = FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS or FLAG_REPORT_VIEW_IDS
         } else {
-            info.flags = FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = FLAG_RETRIEVE_INTERACTIVE_WINDOWS or FLAG_REPORT_VIEW_IDS
         }
+        // Waldlust(무인): 화면공유 팝업을 감지하려면 창 변경 이벤트를 받아야 한다.
+        // (기본 serviceInfo 는 eventTypes=0 이라 onAccessibilityEvent 가 호출되지 않음)
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED
         setServiceInfo(info)
         fakeEditTextForTextStateCalculation = EditText(this)
         // Size here doesn't matter, we won't show this view.

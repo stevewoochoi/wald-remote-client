@@ -387,6 +387,11 @@ class MainService : Service() {
             createForegroundNotification()
 
             if (intent.getBooleanExtra(EXT_INIT_FROM_BOOT, false)) {
+                // Waldlust(무인): 부팅 자동시작 시 루팅 박스라면 접근성(입력)·백그라운드 권한을
+                // root 로 확정해 사람 손 없이 온라인+입력이 되게 한다(루트 없으면 조용히 폴백).
+                Thread {
+                    RootUtil.ensureUnattendedGrants(packageName)
+                }.start()
                 FFI.startService()
             }
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
@@ -412,6 +417,14 @@ class MainService : Service() {
     }
 
     private fun requestMediaProjection() {
+        // Waldlust(무인): 화면공유 동의 팝업을 접근성 서비스가 자동 승인하도록 플래그를 켠다.
+        // 접근성이 아직 안 켜져 있으면(루팅) root 로 켜서 InputService 가 팝업을 클릭할 수 있게 한다.
+        InputService.autoAcceptProjection = true
+        if (!InputService.isOpen) {
+            Thread { RootUtil.ensureUnattendedGrants(packageName) }.start()
+        }
+        // 안전장치: 20초 안에 승인되지 않으면 자동승인 플래그를 해제(엉뚱한 팝업 오클릭 방지).
+        serviceHandler?.postDelayed({ InputService.autoAcceptProjection = false }, 20_000)
         val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
             action = ACT_REQUEST_MEDIA_PROJECTION
             flags = Intent.FLAG_ACTIVITY_NEW_TASK

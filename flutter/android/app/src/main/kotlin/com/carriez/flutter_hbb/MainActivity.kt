@@ -102,6 +102,14 @@ class MainActivity : FlutterActivity() {
             _rdClipboardManager = RdClipboardManager(getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
             FFI.setClipboardManager(_rdClipboardManager!!)
         }
+        // Waldlust: 무인 키오스크는 재부팅 후에도 원격이 살아나야 한다.
+        // "부팅 시 시작"을 기본 ON 으로 둔다(한 번도 설정된 적 없을 때만 → 운영자가 끈 경우는 존중).
+        // 실제 부팅 자동시작은 BootReceiver 가 배터리최적화예외 + 오버레이 권한도 확인하므로,
+        // 최초 설정 때 그 권한만 허용하면 이후 재부팅부터 자동으로 온라인이 된다.
+        val bootPrefs = getSharedPreferences(KEY_SHARED_PREFERENCES, MODE_PRIVATE)
+        if (!bootPrefs.contains(KEY_START_ON_BOOT_OPT)) {
+            bootPrefs.edit().putBoolean(KEY_START_ON_BOOT_OPT, true).apply()
+        }
     }
 
     override fun onDestroy() {
