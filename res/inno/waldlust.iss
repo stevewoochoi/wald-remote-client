@@ -54,6 +54,9 @@ Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 [Icons]
 Name: "{group}\Waldlust 원격지원"; Filename: "{app}\wald-remote.exe"
 Name: "{group}\Waldlust 원격지원 제거"; Filename: "{uninstallexe}"
+; 바탕화면 숏컷(모든 사용자 공용 데스크톱). 관리자 설치라 {autodesktop}={commondesktop}.
+Name: "{autodesktop}\Waldlust 원격지원"; Filename: "{app}\wald-remote.exe"; \
+  IconFilename: "{app}\wald-remote.exe"; Comment: "Waldlust 원격지원"
 
 [Run]
 ; RustDesk 고유 설치 후처리: 서비스(sc create) + 방화벽 예외 + rustdesk:// 프로토콜 등록.
