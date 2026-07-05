@@ -731,8 +731,9 @@ class InputService : AccessibilityService() {
         if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
         // MediaProjection 동의 팝업은 시스템UI/android 패키지에 뜬다. 다른 앱 팝업 오클릭 방지.
+        // OEM(SUNMI 등) 커스텀 ROM 은 systemui 파생 패키지일 수 있어 substring 으로 매칭.
         val pkg = event.packageName?.toString() ?: ""
-        if (pkg != "com.android.systemui" && pkg != "android") return
+        if (!pkg.contains("systemui") && pkg != "android" && !pkg.contains("mediaprojection")) return
         val root = rootInActiveWindow ?: return
         if (tryClickProjectionAccept(root)) {
             autoAcceptProjection = false

@@ -416,7 +416,16 @@ class MainService : Service() {
         updateScreenInfo(newConfig.orientation)
     }
 
+    private var lastProjectionRequestMs = 0L
+
     private fun requestMediaProjection() {
+        // 재요청 폭주 방지: 12초 내 재호출은 무시(연결마다 startCapture 가 여러 번 불릴 수 있음).
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastProjectionRequestMs < 12_000L) {
+            Log.d(logTag, "requestMediaProjection debounced")
+            return
+        }
+        lastProjectionRequestMs = now
         // Waldlust(무인): 화면공유 동의 팝업을 접근성 서비스가 자동 승인하도록 플래그를 켠다.
         // 접근성이 아직 안 켜져 있으면(루팅) root 로 켜서 InputService 가 팝업을 클릭할 수 있게 한다.
         InputService.autoAcceptProjection = true
@@ -478,7 +487,12 @@ class MainService : Service() {
             return true
         }
         if (mediaProjection == null) {
-            Log.w(logTag, "startCapture fail,mediaProjection is null")
+            // Waldlust(무인): 캡처 토큰이 없으면(부팅 시 팝업 무시/미승인 등) "실패"로 끝내지 말고
+            // 연결 시점에 화면공유 권한을 다시 요청한다. 접근성이 켜져 있으면(루팅 프로비저닝)
+            // 팝업이 자동 승인되고, 아니면 최소한 기기 화면에 팝업이 떠서 수동 승인이 가능해진다.
+            // (이게 없으면 '알림도 안 뜨고 화면만 검은' 상태가 된다.)
+            Log.w(logTag, "startCapture: mediaProjection null → 화면공유 권한 재요청")
+            requestMediaProjection()
             return false
         }
         
