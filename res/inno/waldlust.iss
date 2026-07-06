@@ -5,7 +5,7 @@
 ;    한 개로 배포한다. Defender ML 이 가장 덜 의심하는 형태.
 ;  - 이 인스톨러는 파일 복사 + 제어판 등록 + 시작메뉴만 담당한다.
 ;  - 서비스 등록/방화벽/URL 프로토콜 같은 RustDesk 고유 작업은 앱 본체의
-;    "wald-remote.exe --after-install" 을 호출해서 위임한다.
+;    "Waldlust.exe --after-install" 을 호출해서 위임한다(설치 시 메인 exe 를 Waldlust.exe 로 넣음).
 ;  - 설치 경로는 반드시 {autopf}\Waldlust 로 고정한다. RustDesk 의 --after-install /
 ;    --uninstall 이 get_default_install_path()=="C:\Program Files\<APP_NAME=Waldlust>" 를
 ;    기준으로 exe 를 찾기 때문. (경로를 바꾸면 서비스 등록이 어긋난다 → DisableDirPage=yes)
@@ -30,7 +30,7 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 DefaultGroupName=Waldlust 원격지원
 UninstallDisplayName=Waldlust 원격지원
-UninstallDisplayIcon={app}\wald-remote.exe
+UninstallDisplayIcon={app}\Waldlust.exe
 OutputBaseFilename=waldlust-setup-{#MyAppVersion}-x86_64
 Compression=lzma2
 SolidCompression=yes
@@ -48,20 +48,28 @@ CloseApplications=yes
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [Files]
-; flutter windows 빌드 산출물 폴더 전체(wald-remote.exe + DLL + data\ + 서비스 등)를 그대로 복사.
-Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+; flutter windows 빌드 산출물 폴더 전체(DLL + data\ 등)를 복사하되, 메인 exe(wald-remote.exe)는 제외.
+; 메인 exe 는 아래에서 반드시 "Waldlust.exe" 로 이름을 바꿔 설치한다.
+;  이유(핵심 버그 수정): 앱 내부(APP_NAME=Waldlust)는 --after-install 시 서비스 바이너리를
+;  get_default_install_path()\Waldlust.exe 로 등록한다. 그런데 빌드 산출물의 exe 이름은
+;  wald-remote.exe 라서, 그대로 깔면 서비스가 없는 Waldlust.exe 를 가리켜 시작 실패(에러 2)한다.
+;  → 파일명을 Waldlust.exe 로 맞춰야 서비스가 정상 기동한다.
+Source: "{#MyBuildDir}\*"; DestDir: "{app}"; Excludes: "wald-remote.exe"; \
+  Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#MyBuildDir}\wald-remote.exe"; DestDir: "{app}"; DestName: "Waldlust.exe"; \
+  Flags: ignoreversion
 
 [Icons]
-Name: "{group}\Waldlust 원격지원"; Filename: "{app}\wald-remote.exe"
+Name: "{group}\Waldlust 원격지원"; Filename: "{app}\Waldlust.exe"
 Name: "{group}\Waldlust 원격지원 제거"; Filename: "{uninstallexe}"
 ; 바탕화면 숏컷(모든 사용자 공용 데스크톱). 관리자 설치라 {autodesktop}={commondesktop}.
-Name: "{autodesktop}\Waldlust 원격지원"; Filename: "{app}\wald-remote.exe"; \
-  IconFilename: "{app}\wald-remote.exe"; Comment: "Waldlust 원격지원"
+Name: "{autodesktop}\Waldlust 원격지원"; Filename: "{app}\Waldlust.exe"; \
+  IconFilename: "{app}\Waldlust.exe"; Comment: "Waldlust 원격지원"
 
 [Run]
 ; RustDesk 고유 설치 후처리: 서비스(sc create) + 방화벽 예외 + rustdesk:// 프로토콜 등록.
 ; 파일이 이미 {app} 에 복사된 상태에서 호출해야 하며, 관리자 권한으로 실행된다(인스톨러가 admin).
-Filename: "{app}\wald-remote.exe"; Parameters: "--after-install"; \
+Filename: "{app}\Waldlust.exe"; Parameters: "--after-install"; \
   StatusMsg: "서비스 등록 중..."; Flags: runhidden waituntilterminated
 ; 이중 보장(belt-and-suspenders): --after-install 의 서비스 시작이 타이밍/권한 문제로 실패해도
 ; 무인 원격이 끊기지 않도록 서비스 자동시작·즉시시작·크래시 자동복구를 인스톨러에서 한 번 더 확정한다.
@@ -74,10 +82,10 @@ Filename: "{sys}\sc.exe"; Parameters: "failure Waldlust reset= 86400 actions= re
 Filename: "{sys}\sc.exe"; Parameters: "start Waldlust"; \
   StatusMsg: "서비스 시작 중..."; Flags: runhidden waituntilterminated
 ; 설치 완료 후 앱을 바로 띄우고 싶으면 아래 주석 해제(선택):
-; Filename: "{app}\wald-remote.exe"; Description: "Waldlust 원격지원 실행"; \
+; Filename: "{app}\Waldlust.exe"; Description: "Waldlust 원격지원 실행"; \
 ;   Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; 제거 시: 서비스 중지·삭제 + 방화벽 규칙 삭제 + 레지스트리 정리.
-Filename: "{app}\wald-remote.exe"; Parameters: "--before-uninstall"; \
+Filename: "{app}\Waldlust.exe"; Parameters: "--before-uninstall"; \
   Flags: runhidden waituntilterminated; RunOnceId: "WaldlustBeforeUninstall"
