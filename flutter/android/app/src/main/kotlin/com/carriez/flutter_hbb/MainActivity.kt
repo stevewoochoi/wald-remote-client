@@ -110,6 +110,22 @@ class MainActivity : FlutterActivity() {
         if (!bootPrefs.contains(KEY_START_ON_BOOT_OPT)) {
             bootPrefs.edit().putBoolean(KEY_START_ON_BOOT_OPT, true).apply()
         }
+        // Waldlust(무인): 부팅 자동시작이 실제로 동작하려면 배터리 최적화 예외 + 오버레이 권한이 필요하다.
+        // BootReceiver 가 이 둘을 확인하고 없으면 자동시작을 건너뛰므로, 최초 실행 때 자동으로 요청한다.
+        // (루팅이면 RootUtil 로도 부여되지만, 비루팅 기기는 이 1회 허용만으로 부팅 온라인이 된다.)
+        // 미허용일 때만 요청 → 한 번 허용하면 재부팅해도 유지된다.
+        try {
+            val battery = android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+            val overlay = android.Manifest.permission.SYSTEM_ALERT_WINDOW
+            if (!XXPermissions.isGranted(this, battery, overlay)) {
+                XXPermissions.with(this)
+                    .permission(battery)
+                    .permission(overlay)
+                    .request { _, _ -> }
+            }
+        } catch (e: Exception) {
+            Log.w(logTag, "auto request unattended perms failed: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
