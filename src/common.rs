@@ -168,9 +168,16 @@ fn start_waldlust_heartbeat() {
         std::thread::spawn(|| {
             // 이 기기에서 heartbeat 를 담당할 프로세스를 하나로 정하는 락. 스레드(=이 함수 스택)가
             // 사는 동안 리스너를 쥐고 있어야 하므로 루프 밖 지역변수로 유지한다(드롭 금지).
-            let _heartbeat_owner_lock = match std::net::TcpListener::bind("127.0.0.1:47635") {
-                Ok(l) => l,
-                Err(_) => return, // 이미 다른 프로세스가 담당 중
+            //
+            // 중요(버그 수정): 예전엔 bind 실패 시 그냥 return 해서 영영 포기했다. 안드로이드는 OS 가
+            // 앱 프로세스를 수시로 죽였다 살리는데, 재시작 시 이전 소켓이 아직 안 풀렸으면(TIME_WAIT 등)
+            // bind 가 실패 → 그 프로세스는 heartbeat 를 영영 안 보내 "접속은 되는데 대시보드는 오프라인"
+            // 이 됐다. → 소유권을 못 잡으면 주기적으로 재시도한다(현재 담당 프로세스가 죽으면 이어받음).
+            let _heartbeat_owner_lock = loop {
+                match std::net::TcpListener::bind("127.0.0.1:47635") {
+                    Ok(l) => break l,
+                    Err(_) => std::thread::sleep(std::time::Duration::from_secs(15)),
+                }
             };
             // 시작 직후엔 ID/설정이 준비 안 됐을 수 있어 잠시 대기
             std::thread::sleep(std::time::Duration::from_secs(10));
