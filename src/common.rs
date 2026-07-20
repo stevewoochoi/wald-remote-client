@@ -218,8 +218,14 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
     if id.is_empty() {
         return;
     }
-    // 우리가 관리하는 기기별 접속비번(평문). 관리 빌드에서만 채워진다.
-    let conn_pw = LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY);
+    // 우리가 관리하는 기기별 접속비번(평문). 관리 빌드 + 권위 프로세스에서만 보고한다.
+    // (비권위 프로세스는 자기 저장소의 낡은/어긋난 값으로 대시보드를 덮어쓰면 안 됨 —
+    //  특히 예전 버그버전에서 업그레이드된 기기의 유저 저장소엔 틀린 값이 남아있다.)
+    let conn_pw = if waldlust_owns_password() {
+        LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY)
+    } else {
+        String::new()
+    };
 
     let mut system = System::new();
     system.refresh_memory();
@@ -285,6 +291,31 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
 // 기기간 격리 — 한 대가 뚫려도 다른 기기 비번은 안전 — 는 유지된다.)
 const WALDLUST_MANAGED_PW_KEY: &str = "wald-conn-pw";
 
+// 이 프로세스가 "기기별 영구비번을 소유(생성·저장·보고)해도 되는" 권위 프로세스인지.
+//
+// Windows 비번-불일치 버그의 근원: Windows 는 설정 저장소가 프로세스 컨텍스트별로 갈린다.
+//   - 설치형 서비스(--service)는 LocalSystem 으로 돌며 SYSTEM 프로파일 설정을 쓴다(권위 저장소,
+//     is_root()=is_local_system()=true). 로그인 화면의 --server 도 SYSTEM 이라 같은 저장소를 공유.
+//   - 로그인 후 유저 세션의 --server/UI 는 로그인 유저 프로파일 설정을 따로 쓴다(is_root()=false).
+//   - 들어오는 연결 인증에 쓰이는 영구비번은 데몬(SYSTEM)에서 유저쪽으로 단방향 동기화된다
+//     (RustDesk 가 UI 에서 비번 바꿀 때 ipc::set_permanent_password 로 데몬에 위임하는 것과 같은 이유).
+//     반면 server.rs 의 양방향 config 동기화는 macOS/Linux 전용이라 Windows 엔 없다.
+// 그래서 유저 컨텍스트(비권위)에서 랜덤 비번을 만들면 유저 저장소에만 박혀 데몬이 인증하는 값과
+// 어긋나고, 그 값을 heartbeat 로 보고하면 "대시보드에 표시된 비번으로는 접속 거부"가 된다.
+// → Windows 설치형에서는 데몬(SYSTEM)만 비번을 소유·보고한다. 유저 프로세스는 생성/보고 둘 다 건너뛰고
+//   RustDesk 기존 동기화로 데몬 비번을 받는다. 포터블/비설치는 단일 저장소라 아무 프로세스나 소유.
+// macOS/Linux 는 root↔user 양방향 동기화, Android 는 단일 프로세스라 종전대로 항상 소유.
+fn waldlust_owns_password() -> bool {
+    #[cfg(windows)]
+    {
+        !crate::platform::is_installed() || crate::platform::is_root()
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
+
 fn set_waldlust_preset_password() {
     use hbb_common::config::{
         keys::{OPTION_APPROVE_MODE, OPTION_VERIFICATION_METHOD},
@@ -299,19 +330,22 @@ fn set_waldlust_preset_password() {
         return;
     }
 
-    // 기기별 고유 접속비번을 보장한다.
-    let stored_plain = LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY);
-    if stored_plain.is_empty() {
-        // 이 클라이언트가 아직 관리하지 않는 기기(신규 설치, 또는 기존 공유비번 기기).
-        // 12자 랜덤 비번을 생성해 영구비번으로 설정하고 평문을 로컬에 보관 → 다음 heartbeat 부터 보고.
-        // (기존 공유비번 기기는 wald-conn-pw 가 비어 있으므로 이 시점에 개별 비번으로 교체된다.)
-        let pw = Config::get_auto_password(12);
-        if Config::set_permanent_password(&pw) {
-            LocalConfig::set_option(WALDLUST_MANAGED_PW_KEY.to_owned(), pw);
+    // 권위 프로세스만 비번을 생성·저장한다(위 waldlust_owns_password 주석 참고).
+    if waldlust_owns_password() {
+        // 기기별 고유 접속비번을 보장한다.
+        let stored_plain = LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY);
+        if stored_plain.is_empty() {
+            // 이 클라이언트가 아직 관리하지 않는 기기(신규 설치, 또는 기존 공유비번 기기).
+            // 12자 랜덤 비번을 생성해 영구비번으로 설정하고 평문을 로컬에 보관 → 다음 heartbeat 부터 보고.
+            // (기존 공유비번 기기는 wald-conn-pw 가 비어 있으므로 이 시점에 개별 비번으로 교체된다.)
+            let pw = Config::get_auto_password(12);
+            if Config::set_permanent_password(&pw) {
+                LocalConfig::set_option(WALDLUST_MANAGED_PW_KEY.to_owned(), pw);
+            }
+        } else if !Config::has_local_permanent_password() {
+            // 이미 관리 중이나 영구비번 저장이 사라진 경우(설정 초기화 등) 보관 평문으로 복구.
+            Config::set_permanent_password(&stored_plain);
         }
-    } else if !Config::has_local_permanent_password() {
-        // 이미 관리 중이나 영구비번 저장이 사라진 경우(설정 초기화 등) 보관 평문으로 복구.
-        Config::set_permanent_password(&stored_plain);
     }
 
     // 무인접속: 일회용 비번 끄고 영구비번만 인증 + 비번 맞으면 수락창 없이 자동 입장.
