@@ -218,13 +218,26 @@ fn send_waldlust_heartbeat(client: &reqwest::blocking::Client, include_apps: boo
     if id.is_empty() {
         return;
     }
-    // 우리가 관리하는 기기별 접속비번(평문). 관리 빌드 + 권위 프로세스에서만 보고한다.
-    // (비권위 프로세스는 자기 저장소의 낡은/어긋난 값으로 대시보드를 덮어쓰면 안 됨 —
-    //  특히 예전 버그버전에서 업그레이드된 기기의 유저 저장소엔 틀린 값이 남아있다.)
+    // 우리가 관리하는 기기별 접속비번(평문). 대시보드에 보고할 값.
+    //   - 권위 프로세스(데몬/포터블): 자기 저장소의 평문을 그대로 읽는다.
+    //   - 비권위 프로세스(설치형 Windows 유저세션): 자기 저장소엔 평문이 없다(생성을 데몬만 함).
+    //     이 프로세스가 하트비트 담당(포트 선점 승자)일 수 있으므로, 데몬의 권위 평문을 IPC 로
+    //     받아 보고한다. 안 그러면 "온라인인데 접속비번 미보고" 구멍이 생긴다(설치 직후 재부팅
+    //     전, 유저세션이 포트를 먼저 잡은 경우 등). 실패 시 빈 값 → 서버 COALESCE 로 기존값 유지.
     let conn_pw = if waldlust_owns_password() {
         LocalConfig::get_option(WALDLUST_MANAGED_PW_KEY)
     } else {
-        String::new()
+        #[cfg(windows)]
+        {
+            crate::ipc::get_config(WALDLUST_MANAGED_PW_KEY)
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+        }
+        #[cfg(not(windows))]
+        {
+            String::new()
+        }
     };
 
     let mut system = System::new();

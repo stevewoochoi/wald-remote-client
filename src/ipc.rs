@@ -873,6 +873,12 @@ async fn handle(data: Data, stream: &mut Connection) {
                     value = Some(Config::get_unlock_pin());
                 } else if name == "trusted-devices" {
                     value = Some(Config::get_trusted_devices_json());
+                } else if name == "wald-conn-pw" {
+                    // Waldlust: 데몬(SYSTEM)이 소유한 기기별 접속비번 평문. Windows 는 설정저장소가
+                    // SYSTEM/유저로 갈리므로, 유저세션 프로세스가 하트비트를 보낼 때 이 IPC 로 데몬의
+                    // 권위 평문을 받아 대시보드에 보고한다(common.rs send_waldlust_heartbeat 참고).
+                    let v = hbb_common::config::LocalConfig::get_option("wald-conn-pw");
+                    value = if v.is_empty() { None } else { Some(v) };
                 } else {
                     value = None;
                 }
